@@ -1,0 +1,151 @@
+import pandas as pd
+import requests
+import psycopg2
+from psycopg2.extras import execute_values
+
+# Étape 1 : Collecter les données depuis l'API
+def collect_data():
+    url = "https://fakestoreapi.com/products"
+    response = requests.get(url)
+    # Vérifier que la requête a réussi
+    if response.status_code == 200:  
+        data = response.json()
+        return data
+    else:
+        print("Erreur lors de la collecte des données :", response.status_code)
+        return None
+
+# Étape 2 : Nettoyer les données
+def clean_data(data):
+    # Convertir les données en DataFrame
+    df = pd.DataFrame(data)
+
+    # Vérifier les valeurs manquantes
+    print("Valeurs manquantes par colonne :")
+    print(df.isnull().sum())
+
+    # Convertir les colonnes nécessaires
+    # Convertir 'price' en float
+    df['price'] = df['price'].astype(float)
+    # Extraire le taux d'évaluation  
+    df['rating'] = df['rating'].apply(lambda x: x['rate'])  
+    # Afficher les premières lignes pour vérifier
+    print("\nDataFrame après nettoyage :")
+    print(df.head())
+
+    return df
+
+# Étape 3 : Se connecter à PostgreSQL et insérer les données
+def save_to_postgres(df):
+    try:
+        # Connexion à la base de données
+        conn = psycopg2.connect(
+            dbname="ecommerce_sales",
+            user="postgres",          
+            password="1234",           
+            host="localhost",         
+            port="5432"                
+        )
+        cur = conn.cursor()
+        # Vérifier que la connexion marche
+        print("Connexion réussie à PostgreSQL.")  
+        # Supprimer la table si elle existe déjà
+        cur.execute("DROP TABLE IF EXISTS sales;")
+        print("Table 'sales' supprimée si elle existait déjà.")
+
+        # Créer de la table
+        cur.execute("""
+            CREATE TABLE sales (
+                id SERIAL PRIMARY KEY,
+                title TEXT,
+                price FLOAT,
+                category TEXT,
+                description TEXT,
+                image TEXT,
+                rating DOUBLE PRECISION
+            )
+        """)
+        print("Table 'sales' créée avec succès.")
+
+        # Préparer des données pour l'insertion
+        # Sélectionner les colonnes nécessaires
+        df = df[['title', 'price', 'category', 'description', 'image', 'rating']]  
+         # Convertir les données en tuples
+        tuples = [tuple(x) for x in df.to_numpy()] 
+        # Obtenir les noms des colonnes
+        cols = ','.join(df.columns)  
+        # Requête SQL
+        query = f"INSERT INTO sales ({cols}) VALUES %s"  
+
+        # Inserer des données
+        execute_values(cur, query, tuples)
+        print("Données insérées avec succès.")
+
+        # Valider des changements
+        conn.commit()
+
+    except Exception as e:
+        print("Une erreur s'est produite :", e)
+
+    finally:
+        # Fermeture de la connexion
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+# Étape 4 : Vérifier les données dans PostgreSQL
+def verify_data():
+    try:
+        # Connexion à la base de données
+        conn = psycopg2.connect(
+            dbname="ecommerce_sales",
+            user="postgres",
+            password="1234",
+            host="localhost",
+            port="5432"
+        )
+        cur = conn.cursor()
+
+        # Récupérer les données de la table 'sales'
+        cur.execute("SELECT * FROM sales;")
+        rows = cur.fetchall()
+
+        # Afficher les données
+        print("\nDonnées dans la table 'sales' :")
+        for row in rows:
+            print(row)
+
+    except Exception as e:
+        print("Une erreur s'est produite :", e)
+
+    finally:
+        # Fermeture de la connexion
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+# Étape 5 : Exécuter le pipeline
+def main():
+    # Collecter les données
+    data = collect_data()
+    if data is None:
+        return  # Arrêter si la collecte a échoué
+
+    # Nettoyer les données
+    df = clean_data(data)
+
+    # Exporter les données nettoyées dans un fichier CSV
+    df.to_csv('C:/Users/36171/Documents/DataUseCases/ecom/sales_data.csv', index=False)
+    print("Données exportées dans 'sales_data.csv'.")
+
+    # Sauvegarder les données dans PostgreSQL
+    save_to_postgres(df)
+
+    # Vérifier les données dans PostgreSQL
+    verify_data()
+
+# Exécuter le pipeline
+if __name__ == "__main__":
+    main()
